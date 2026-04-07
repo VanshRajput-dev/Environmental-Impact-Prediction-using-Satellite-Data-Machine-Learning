@@ -1,0 +1,12 @@
+{
+    "Total training images": 18957,
+    "Total val images": 5455,
+    "Number of classes": 10,
+    "Class imbalance ratio": 1.44,
+    "Image resolution": "64x64 px",
+    "Mean brightness (train)": 97.1,
+    "Mean contrast (train)": 18.1,
+    "Mean sharpness (train)": 549.0,
+    "Model val accuracy": "95.40%",
+    "ECE (calibration)": "0.0115"
+}

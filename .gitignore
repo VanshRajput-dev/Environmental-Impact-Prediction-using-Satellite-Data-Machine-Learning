@@ -1,0 +1,25 @@
+# Ignore datasets and outputs
+after/
+before/
+data/
+dataset/
+eda_outputs/
+evaluation_outputs/
+gradcam_outputs/
+
+# Ignore uploads (runtime files)
+static/uploads/
+static/outputs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment
+.env
+
+# Model files (optional, if large)
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/

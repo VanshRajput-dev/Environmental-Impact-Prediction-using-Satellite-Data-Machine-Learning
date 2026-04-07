@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SatScan — Land Use Change Detector</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── RESET & TOKENS ────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #080c10;
+      --surface:   #0e1419;
+      --surface2:  #141c24;
+      --border:    #1e2d3d;
+      --accent:    #00e5ff;
+      --accent2:   #ff6b35;
+      --green:     #39ff6a;
+      --yellow:    #ffe04b;
+      --red:       #ff3d5a;
+      --text:      #d8e8f0;
+      --muted:     #5a7a90;
+      --font-head: 'Syne', sans-serif;
+      --font-mono: 'Space Mono', monospace;
+      --radius:    6px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── SCANLINE OVERLAY ──────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,229,255,0.015) 2px,
+        rgba(0,229,255,0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ─── HEADER ────────────────────────────────────────────────── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 2.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 100;
+    }
+
+    .logo-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    header h1 {
+      font-family: var(--font-head);
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      color: #fff;
+    }
+
+    header h1 span { color: var(--accent); }
+
+    .nav-links { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
+    .nav-links a {
+      font-size: 0.72rem; color: var(--muted); text-decoration: none;
+      border: 1px solid var(--border); padding: 0.3rem 0.8rem;
+      border-radius: 99px; letter-spacing: 0.08em;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--accent); border-color: var(--accent); }
+
+    /* ─── MAIN LAYOUT ───────────────────────────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 3rem 2rem 5rem;
+    }
+
+    /* ─── SECTION TITLES ────────────────────────────────────────── */
+    .section-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    h2 {
+      font-family: var(--font-head);
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 2rem;
+    }
+
+    /* ─── UPLOAD FORM ───────────────────────────────────────────── */
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 640px) { .upload-grid { grid-template-columns: 1fr; } }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 2rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(0,229,255,0.04);
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0;
+      opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+
+    .drop-zone .dz-icon {
+      font-size: 2.2rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+
+    .drop-zone .dz-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    .drop-zone .dz-title {
+      font-family: var(--font-head);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.4rem;
+    }
+
+    .drop-zone .preview-img {
+      max-width: 100%;
+      max-height: 160px;
+      border-radius: 4px;
+      object-fit: cover;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    /* ─── SUBMIT BUTTON ─────────────────────────────────────────── */
+    .btn-analyze {
+      width: 100%;
+      padding: 1rem;
+      background: var(--accent);
+      color: #080c10;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font-head);
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: opacity 0.2s, box-shadow 0.2s;
+      text-transform: uppercase;
+    }
+
+    .btn-analyze:hover {
+      opacity: 0.88;
+      box-shadow: 0 0 24px rgba(0,229,255,0.35);
+    }
+
+    /* ─── ERROR BANNER ──────────────────────────────────────────── */
+    .error-banner {
+      background: rgba(255,61,90,0.12);
+      border: 1px solid var(--red);
+      border-radius: var(--radius);
+      padding: 0.9rem 1.2rem;
+      color: var(--red);
+      font-size: 0.8rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    /* ─── DIVIDER ────────────────────────────────────────────────── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 3rem 0;
+    }
+
+    /* ─── RESULTS ───────────────────────────────────────────────── */
+    .results-section { animation: fadeUp 0.5s ease both; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── IMPACT CARD ───────────────────────────────────────────── */
+    .impact-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.8rem 2rem;
+      margin-bottom: 2.5rem;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .impact-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 0.4rem;
+    }
+
+    .impact-text {
+      font-family: var(--font-head);
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .severity-pill {
+      padding: 0.4rem 1rem;
+      border-radius: 99px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+
+    .sev-low    { background: rgba(57,255,106,0.15); color: var(--green);  border: 1px solid var(--green);  }
+    .sev-medium { background: rgba(255,224,75,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+    .sev-high   { background: rgba(255,61,90,0.15);  color: var(--red);    border: 1px solid var(--red);    }
+
+    /* ─── IMAGE COMPARISON GRID ─────────────────────────────────── */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+
+    @media (max-width: 640px) { .compare-grid { grid-template-columns: 1fr; } }
+
+    .img-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .img-card-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .img-card-header .tag {
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .img-card-header .pred-badge {
+      background: rgba(0,229,255,0.12);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 99px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .img-card img {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .img-card-footer {
+      padding: 1rem;
+    }
+
+    /* ─── CONFIDENCE BAR ────────────────────────────────────────── */
+    .conf-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .conf-name {
+      font-size: 0.68rem;
+      color: var(--text);
+      min-width: 140px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .conf-bar-track {
+      flex: 1;
+      height: 5px;
+      background: var(--surface2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: var(--accent);
+      transition: width 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    .conf-bar-fill.rank2 { background: var(--muted); }
+    .conf-bar-fill.rank3 { background: #1e3a4a; }
+
+    .conf-pct {
+      font-size: 0.68rem;
+      color: var(--muted);
+      min-width: 38px;
+      text-align: right;
+    }
+
+    /* ─── GRAD-CAM SECTION ──────────────────────────────────────── */
+    .gradcam-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 640px) { .gradcam-grid { grid-template-columns: 1fr; } }
+
+    .gradcam-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .gradcam-card-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .gradcam-card img {
+      width: 100%;
+      height: 240px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .gradcam-legend {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    .legend-bar {
+      flex: 1;
+      height: 6px;
+      border-radius: 99px;
+      background: linear-gradient(to right, #00007f, #0000ff, #00ffff, #ffff00, #ff0000);
+    }
+
+    /* ─── INFO NOTE ─────────────────────────────────────────────── */
+    .info-note {
+      background: var(--surface2);
+      border-left: 3px solid var(--accent);
+      padding: 0.9rem 1.2rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      line-height: 1.7;
+      margin-top: 1rem;
+    }
+
+    /* ─── LOADING OVERLAY ───────────────────────────────────────── */
+    #loading-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(8,12,16,0.88);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    #loading-overlay.active { display: flex; }
+
+    .spinner {
+      width: 48px; height: 48px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-size: 0.8rem;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <p class="loading-text">Analysing satellite images…</p>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo-dot"></div>
+  <h1>Sat<span>Scan</span></h1>
+  <nav class="nav-links">
+    <a href="{{ url_for('index') }}" class="active">Upload images</a>
+    <a href="{{ url_for('gps') }}">GPS analysis 🛰️</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ── UPLOAD SECTION ── -->
+  <div class="section-label">Step 01</div>
+  <h2>Upload Satellite Images</h2>
+
+  {% if error %}
+  <div class="error-banner">⚠ {{ error }}</div>
+  {% endif %}
+
+  <form method="POST" enctype="multipart/form-data" id="upload-form">
+    <div class="upload-grid">
+
+      <!-- Before -->
+      <div class="drop-zone" id="before-zone">
+        <input type="file" name="before" accept=".jpg,.jpeg,.png" id="before-input" required />
+        <span class="dz-icon">🛰️</span>
+        <div class="dz-title">Before Image</div>
+        <div class="dz-label">JPG / PNG — drag & drop or click</div>
+        <img class="preview-img" id="before-preview" src="" alt="Before preview" />
+      </div>
+
+      <!-- After -->
+      <div class="drop-zone" id="after-zone">
+        <input type="file" name="after" accept=".jpg,.jpeg,.png" id="after-input" required />
+        <span class="dz-icon">📡</span>
+        <div class="dz-title">After Image</div>
+        <div class="dz-label">JPG / PNG — drag & drop or click</div>
+        <img class="preview-img" id="after-preview" src="" alt="After preview" />
+      </div>
+
+    </div>
+
+    <button type="submit" class="btn-analyze">⚡ Run Analysis</button>
+  </form>
+
+  {% if before %}
+  <hr class="divider" />
+
+  <!-- ── RESULTS ── -->
+  <div class="results-section">
+
+    <div class="section-label">Results</div>
+    <h2>Change Analysis</h2>
+
+    <!-- Impact Card -->
+    <div class="impact-card">
+      <div>
+        <div class="impact-label">Detected Impact</div>
+        <div class="impact-text">{{ impact }}</div>
+      </div>
+      <div>
+        <div class="impact-label">Severity</div>
+        {% set sev_class = 'sev-high' if 'HIGH' in severity else ('sev-medium' if 'MEDIUM' in severity else 'sev-low') %}
+        <span class="severity-pill {{ sev_class }}">{{ severity }}</span>
+      </div>
+      <div style="margin-left:auto; text-align:right;">
+        <div class="impact-label">Classification</div>
+        <div style="font-size:0.9rem; color:var(--text);">
+          <span style="color:var(--muted)">Before →</span> <strong>{{ before_pred }}</strong><br/>
+          <span style="color:var(--muted)">After  →</span> <strong>{{ after_pred }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── IMAGE COMPARISON ── -->
+    <div class="section-label" style="margin-bottom:1rem;">Uploaded Images + Top-3 Predictions</div>
+    <div class="compare-grid">
+
+      <!-- Before card -->
+      <div class="img-card">
+        <div class="img-card-header">
+          <span class="tag">Before</span>
+          <span class="pred-badge">{{ before_pred }} · {{ before_conf }}%</span>
+        </div>
+        <img src="{{ url_for('static', filename='uploads/' ~ before) }}" alt="Before" />
+        <div class="img-card-footer">
+          {% for cls, pct in before_top3 %}
+          <div class="conf-row">
+            <span class="conf-name">{{ cls }}</span>
+            <div class="conf-bar-track">
+              <div class="conf-bar-fill {% if loop.index == 2 %}rank2{% elif loop.index == 3 %}rank3{% endif %}"
+                   style="width:{{ pct }}%"></div>
+            </div>
+            <span class="conf-pct">{{ pct }}%</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- After card -->
+      <div class="img-card">
+        <div class="img-card-header">
+          <span class="tag">After</span>
+          <span class="pred-badge">{{ after_pred }} · {{ after_conf }}%</span>
+        </div>
+        <img src="{{ url_for('static', filename='uploads/' ~ after) }}" alt="After" />
+        <div class="img-card-footer">
+          {% for cls, pct in after_top3 %}
+          <div class="conf-row">
+            <span class="conf-name">{{ cls }}</span>
+            <div class="conf-bar-track">
+              <div class="conf-bar-fill {% if loop.index == 2 %}rank2{% elif loop.index == 3 %}rank3{% endif %}"
+                   style="width:{{ pct }}%"></div>
+            </div>
+            <span class="conf-pct">{{ pct }}%</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── GRAD-CAM ── -->
+    <div class="section-label" style="margin-bottom:1rem;">Grad-CAM Attention Maps</div>
+    <div class="gradcam-grid">
+
+      <div class="gradcam-card">
+        <div class="gradcam-card-header">Before — model attention overlay</div>
+        <img src="{{ url_for('static', filename='outputs/' ~ before_cam) }}" alt="Grad-CAM Before" />
+        <div class="gradcam-legend">
+          <span>Low</span>
+          <div class="legend-bar"></div>
+          <span>High attention</span>
+        </div>
+      </div>
+
+      <div class="gradcam-card">
+        <div class="gradcam-card-header">After — model attention overlay</div>
+        <img src="{{ url_for('static', filename='outputs/' ~ after_cam) }}" alt="Grad-CAM After" />
+        <div class="gradcam-legend">
+          <span>Low</span>
+          <div class="legend-bar"></div>
+          <span>High attention</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="info-note">
+      🔍 <strong>Grad-CAM</strong> highlights which regions of the satellite image most influenced
+      the model's classification decision. Red/yellow areas = high attention; blue = low attention.
+      Each image is processed independently with fresh hooks — results will differ when land use differs.
+    </div>
+
+  </div>
+  {% endif %}
+
+</main>
+
+<script>
+  // ── Image preview on file select ──
+  function setupPreview(inputId, previewId, zoneId) {
+    const input   = document.getElementById(inputId);
+    const preview = document.getElementById(previewId);
+    const zone    = document.getElementById(zoneId);
+
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        zone.querySelector('.dz-icon').style.display = 'none';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Drag-and-drop highlight
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop',      e => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      input.files = e.dataTransfer.files;
+      input.dispatchEvent(new Event('change'));
+    });
+  }
+
+  setupPreview('before-input', 'before-preview', 'before-zone');
+  setupPreview('after-input',  'after-preview',  'after-zone');
+
+  // ── Loading overlay on submit ──
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    document.getElementById('loading-overlay').classList.add('active');
+  });
+
+  // ── Animate confidence bars on load ──
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.conf-bar-fill').forEach(bar => {
+      const target = bar.style.width;
+      bar.style.width = '0%';
+      requestAnimationFrame(() => {
+        setTimeout(() => { bar.style.width = target; }, 100);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
